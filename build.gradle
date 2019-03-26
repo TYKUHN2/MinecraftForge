@@ -294,20 +294,22 @@ artifacts {
     archives makeMdk
 }
 
-task ciWriteBuildNumber << {
-    def file = file("src/main/java/net/minecraftforge/common/ForgeVersion.java");
-    def bn = System.getenv("BUILD_NUMBER")?:project.ext.properties.buildNumber?:0;
-    def outfile = "";
-    def ln = "\n"; //Linux line endings because we're on git!
+task ciWriteBuildNumber {
+	doLast {
+		def file = file("src/main/java/net/minecraftforge/common/ForgeVersion.java");
+		def bn = System.getenv("BUILD_NUMBER")?:project.ext.properties.buildNumber?:0;
+		def outfile = "";
+		def ln = "\n"; //Linux line endings because we're on git!
 
-    file.eachLine{ String s ->
-        if (s.matches("^    public static final int buildVersion    = [\\d]+;\$"))
-            s = "    public static final int buildVersion    = ${bn};";
-        if (s.matches('^    public static final String mcVersion = "[^\\"]+";'))
-            s = "    public static final String mcVersion = \"${minecraft.version}\";";
-        outfile += (s+ln);
-    }
-    file.write(outfile);
+		file.eachLine{ String s ->
+			if (s.matches("^    public static final int buildVersion    = [\\d]+;\$"))
+				s = "    public static final int buildVersion    = ${bn};";
+			if (s.matches('^    public static final String mcVersion = "[^\\"]+";'))
+				s = "    public static final String mcVersion = \"${minecraft.version}\";";
+			outfile += (s+ln);
+		}
+		file.write(outfile);
+	}
 }
 
 uploadArchives {
@@ -455,9 +457,11 @@ reobfuscate {
     ]
 }
 
-task resetBuildNumber << {
-    project.ext.properties.buildNumber = 0;
-    ciWriteBuildNumber.execute()
+task resetBuildNumber {
+	doLast {
+		project.ext.properties.buildNumber = 0;
+		ciWriteBuildNumber.execute()
+	}
 }
 // re-add old tasks for jenkins compat
 // should be removed, and the jenkins fixed when no longer building with FG 1.2
@@ -466,12 +470,14 @@ task buildPackages { dependsOn 'build' }
 
 //Temporary hack to fix compile errors caused by mappings shading in Bootstrap
 /*
-task fixParams << {
-    logger.lifecycle('Fixing param names!')
-    def params = new File(extractMcpMappings.destinationDir, 'params.csv')
-    def text = params.text
-    text = text.replaceAll('p_180276_1_,biome,', 'p_180276_1_,biomeIn,')
-    params.write(text)
+task fixParams {
+	doLast {
+		logger.lifecycle('Fixing param names!')
+		def params = new File(extractMcpMappings.destinationDir, 'params.csv')
+		def text = params.text
+		text = text.replaceAll('p_180276_1_,biome,', 'p_180276_1_,biomeIn,')
+		params.write(text)
+	}
 }
 fixParams.dependsOn('extractMcpMappings')
 extractMcpMappings.finalizedBy('fixParams')
