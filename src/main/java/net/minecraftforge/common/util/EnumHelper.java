@@ -57,11 +57,7 @@ import javax.annotation.Nullable;
 
 public class EnumHelper
 {
-    private static Object reflectionFactory      = null;
-    private static Method newConstructorAccessor = null;
     private static Method newInstance            = null;
-    private static Method newFieldAccessor       = null;
-    private static Method fieldAccessorSet       = null;
     private static boolean isSetup               = false;
 
     //Some enums are decompiled with extra arguments, so lets check for that
@@ -181,12 +177,11 @@ public class EnumHelper
 
         try
         {
-            Method getReflectionFactory = Class.forName("sun.reflect.ReflectionFactory").getDeclaredMethod("getReflectionFactory");
-            reflectionFactory      = getReflectionFactory.invoke(null);
-            newConstructorAccessor = Class.forName("sun.reflect.ReflectionFactory").getDeclaredMethod("newConstructorAccessor", Constructor.class);
-            newInstance            = Class.forName("sun.reflect.ConstructorAccessor").getDeclaredMethod("newInstance", Object[].class);
-            newFieldAccessor       = Class.forName("sun.reflect.ReflectionFactory").getDeclaredMethod("newFieldAccessor", Field.class, boolean.class);
-            fieldAccessorSet       = Class.forName("sun.reflect.FieldAccessor").getDeclaredMethod("set", Object.class, Object.class);
+    		try {
+        		newInstance = Class.forName("jdk.internal.reflect.ConstructorAccessor").getDeclaredMethod("newInstance", Object[].class);
+    		} catch (ClassNotFoundException e) {
+        		newInstance	= Class.forName("sun.reflect.ConstructorAccessor").getDeclaredMethod("newInstance", Object[].class);
+    		}
         }
         catch (Exception e)
         {
@@ -207,7 +202,22 @@ public class EnumHelper
         parameterTypes[0] = String.class;
         parameterTypes[1] = int.class;
         System.arraycopy(additionalParameterTypes, 0, parameterTypes, 2, additionalParameterTypes.length);
-        return newConstructorAccessor.invoke(reflectionFactory, enumClass.getDeclaredConstructor(parameterTypes));
+        
+        Constructor<?> constructor = enumClass.getDeclaredConstructor(parameterTypes);
+        
+        //The following is stolen from https://stackoverflow.com/questions/9614282/how-to-create-an-instance-of-enum-using-reflection-in-java/51244909#51244909
+        Field constructorAccessorField = Constructor.class.getDeclaredField("constructorAccessor");
+        constructorAccessorField.setAccessible(true);
+        
+        Object ca = constructorAccessorField.get(constructor);
+        
+        if (ca == null) {
+            Method acquireConstructorAccessorMethod = Constructor.class.getDeclaredMethod("acquireConstructorAccessor");
+            acquireConstructorAccessorMethod.setAccessible(true);
+            ca = acquireConstructorAccessorMethod.invoke(constructor);
+        }
+        
+        return ca;
     }
 
     private static < T extends Enum<? >> T makeEnum(Class<T> enumClass, @Nullable String value, int ordinal, Class<?>[] additionalTypes, @Nullable Object[] additionalValues) throws Exception
@@ -220,17 +230,48 @@ public class EnumHelper
         {
             System.arraycopy(additionalValues, 0, params, 2, additionalValues.length);
         }
-        return enumClass.cast(newInstance.invoke(getConstructorAccessor(enumClass, additionalTypes), new Object[] {params}));
+        
+        Object accessor = getConstructorAccessor(enumClass, additionalTypes);
+        Object res;
+        
+        try {
+        	res = newInstance.invoke(accessor, new Object[] {params});
+        } catch (IllegalAccessException e) {
+        	throw new AssertionError("Failed to reflect enum, likely due to user forgetting `--add-exports java.base/jdk.internal.reflect=ALL-UNNAMED`", e);
+        }
+        
+        return enumClass.cast(res);
+    }
+    
+    //The following code is ripped from https://stackoverflow.com/questions/49102935/why-i-cant-use-method-getjava-lang-reflect-fieldget-before-changing-fields/#49103626
+    private static void clearFieldAccessors(Field field)
+            throws ReflectiveOperationException {
+        Field fa = Field.class.getDeclaredField("fieldAccessor");
+        fa.setAccessible(true);
+        fa.set(field, null);
+
+        Field ofa = Field.class.getDeclaredField("overrideFieldAccessor");
+        ofa.setAccessible(true);
+        ofa.set(field, null);
+
+        Field rf = Field.class.getDeclaredField("root");
+        rf.setAccessible(true);
+        Field root = (Field) rf.get(field);
+        if (root != null) {
+            clearFieldAccessors(root);
+        }
     }
 
+    //The following code is ripped from https://stackoverflow.com/questions/9614282/how-to-create-an-instance-of-enum-using-reflection-in-java/#51244909
     public static void setFailsafeFieldValue(Field field, @Nullable Object target, @Nullable Object value) throws Exception
     {
-        field.setAccessible(true);
-        Field modifiersField = Field.class.getDeclaredField("modifiers");
-        modifiersField.setAccessible(true);
-        modifiersField.setInt(field, field.getModifiers() & ~Modifier.FINAL);
-        Object fieldAccessor = newFieldAccessor.invoke(reflectionFactory, field, false);
-        fieldAccessorSet.invoke(fieldAccessor, target, value);
+    	clearFieldAccessors(field);
+    	
+    	field.setAccessible(true);
+	    Field modifiersField = Field.class.getDeclaredField("modifiers");
+	    modifiersField.setAccessible(true);
+	    modifiersField.setInt(field, field.getModifiers() & ~ Modifier.FINAL);
+        field.set(target, value);
     }
 
     private static void blankField(Class<?> enumClass, String fieldName) throws Exception
