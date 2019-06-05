@@ -237,7 +237,7 @@ public class EnumHelper
         try {
         	res = newInstance.invoke(accessor, new Object[] {params});
         } catch (IllegalAccessException e) {
-        	throw new AssertionError("Failed to reflect enum, likely due to user forgetting `--add-exports java.base/jdk.internal.reflect=ALL-UNNAMED`", e);
+        	throw new LinkageError("Failed to reflect enum, likely due to user forgetting `--add-exports java.base/jdk.internal.reflect=ALL-UNNAMED`", e);
         }
         
         return enumClass.cast(res);
