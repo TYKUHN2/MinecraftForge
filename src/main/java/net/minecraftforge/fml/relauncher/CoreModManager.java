@@ -24,11 +24,14 @@ import java.io.File;
 import java.io.FileFilter;
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.lang.reflect.Field;
 import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLClassLoader;
 import java.security.cert.Certificate;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Calendar;
@@ -153,7 +156,7 @@ public class CoreModManager {
             if (setupClass != null)
             {
                 try
-                {
+                {                	
                     IFMLCallHook call = (IFMLCallHook) Class.forName(setupClass, true, classLoader).newInstance();
                     Map<String, Object> callData = new HashMap<String, Object>();
                     callData.put("runtimeDeobfuscationEnabled", !deobfuscatedEnvironment);
@@ -453,18 +456,60 @@ public class CoreModManager {
     }
 
     private static Method ADDURL;
+    
+    private static void removeFinal(Field field) throws Exception {
+    	field.setAccessible(true);
+	    Field modifiersField = Field.class.getDeclaredField("modifiers");
+	    modifiersField.setAccessible(true);
+	    modifiersField.setInt(field, field.getModifiers() & ~ Modifier.FINAL);
+    }
+    
+    @SuppressWarnings("unchecked")
+	private static void patchSourcePath(Object ucp, File coreMod) throws Exception {
+    	Class<?> URLClassPath = Class.forName("jdk.internal.loader.URLClassPath");
+    	
+    	Field pathField = URLClassPath.getDeclaredField("path");
+    	Field unopenedField = URLClassPath.getDeclaredField("unopenedUrls");
+    	removeFinal(pathField);
+    	removeFinal(unopenedField);
+    	
+    	ArrayList<URL> path = (ArrayList<URL>)pathField.get(ucp);
+    	ArrayDeque<URL> unopened = (ArrayDeque<URL>)unopenedField.get(ucp);
+    	
+    	URL newURL = coreMod.toURI().toURL();
+    	path.add(newURL);
+    	unopened.add(newURL);
+    }
 
     private static void handleCascadingTweak(File coreMod, JarFile jar, String cascadedTweaker, LaunchClassLoader classLoader, Integer sortingOrder)
     {
         try
         {
             // Have to manually stuff the tweaker into the parent classloader
-            if (ADDURL == null)
-            {
-                ADDURL = URLClassLoader.class.getDeclaredMethod("addURL", URL.class);
-                ADDURL.setAccessible(true);
-            }
-            ADDURL.invoke(classLoader.getClass().getClassLoader(), coreMod.toURI().toURL());
+        	
+        	try {
+        		Class.forName("jdk.internal.reflect.ConstructorAccessor"); //Only present in Java 9+
+        		
+        		ClassLoader app = ClassLoader.getSystemClassLoader();
+        		
+        		Field ucp = Class.forName("jdk.internal.loader.BuiltinClassLoader").getDeclaredField("ucp");
+        		
+        		try {
+        			ucp.setAccessible(true);
+        		} catch (Exception e) {
+        			throw new LinkageError("Failed to reflect classpath, likely due to user forgetting `--add-opens java.base/jdk.internal.loader=ALL-UNNAMED`", e);
+        		}
+        		
+        		patchSourcePath(ucp.get(app), coreMod);
+        	} catch (ClassNotFoundException e) {
+        		if (ADDURL == null)
+                {
+            		ADDURL = URLClassLoader.class.getDeclaredMethod("addURL", URL.class);
+            		ADDURL.setAccessible(true);
+                }
+                ADDURL.invoke(classLoader.getClass().getClassLoader(), coreMod.toURI().toURL());
+        	}
+
             classLoader.addURL(coreMod.toURI().toURL());
             CoreModManager.tweaker.injectCascadingTweak(cascadedTweaker);
             tweakSorting.put(cascadedTweaker,sortingOrder);
