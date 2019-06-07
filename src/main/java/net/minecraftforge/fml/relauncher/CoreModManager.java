@@ -492,7 +492,7 @@ public class CoreModManager {
         		
         		ClassLoader app = ClassLoader.getSystemClassLoader();
         		
-        		Field ucp = Class.forName("jdk.internal.loader.BuiltinClassLoader").getDeclaredField("ucp");
+        		Field ucp = Class.forName("jdk.internal.loader.ClassLoaders$AppClassLoader").getDeclaredField("ucp");
         		
         		try {
         			ucp.setAccessible(true);
